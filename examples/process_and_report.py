@@ -10,6 +10,7 @@ This script shows how to:
 import asyncio
 import logging
 import sys
+import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -94,9 +95,12 @@ async def analyze_performance(data: Dict[str, Any]) -> Dict[str, Any]:
         # Initialize analyzer
         analyzer = PerformanceAnalyzer()
         
+        # Convert policy data to DataFrame
+        df = pd.DataFrame(data['data']['policies'])
+        
         # Calculate comprehensive metrics
         metrics = analyzer.calculate_agent_metrics(
-            data=data['data']['policies'],
+            data=df,
             include_predictions=True
         )
         
@@ -146,7 +150,7 @@ async def generate_reports(
             # Create report command
             command = GenerateReportCommand(
                 agent_npn=agent_npn,
-                report_type=ReportType.PERFORMANCE,
+                report_type=ReportType.PERFORMANCE_ANALYSIS,
                 generated_by='system',
                 options={
                     'include_charts': True,

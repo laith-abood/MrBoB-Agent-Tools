@@ -15,7 +15,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
 @dataclass
 class ValidationResult:
     """Results of data validation."""
@@ -98,7 +97,8 @@ class DataValidator:
                     
                     except Exception as e:
                         errors.append(
-                            f"Error converting {field} to {expected_type}: {str(e)}"
+                            f"Error converting {field} to "
+                            f"{expected_type}: {e}"
                         )
             
             # Validate policy numbers are unique

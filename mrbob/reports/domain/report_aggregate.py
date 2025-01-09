@@ -27,10 +27,10 @@ class ReportType(Enum):
 @dataclass(frozen=True)
 class ReportMetadata:
     """Immutable report metadata value object."""
-    generated_at: datetime
-    generated_by: str
-    report_type: ReportType
     version: str = "1.0"
+    generated_at: datetime = field(default_factory=datetime.now)
+    generated_by: str = ""
+    report_type: ReportType = ReportType.AGENT_SUMMARY
 
 @dataclass(frozen=True)
 class ReportSection:
@@ -41,12 +41,8 @@ class ReportSection:
     template_key: str
 
 # Domain Events
-@dataclass
 class ReportEvent(ABC):
     """Base class for report domain events."""
-    report_id: UUID
-    timestamp: datetime = field(default_factory=datetime.now)
-    
     @abstractmethod
     def event_type(self) -> str:
         pass
@@ -55,6 +51,8 @@ class ReportEvent(ABC):
 class ReportCreatedEvent(ReportEvent):
     """Event emitted when a new report is created."""
     metadata: ReportMetadata
+    report_id: UUID = field(default_factory=uuid4)
+    timestamp: datetime = field(default_factory=datetime.now)
     
     def event_type(self) -> str:
         return "report.created"
@@ -63,6 +61,8 @@ class ReportCreatedEvent(ReportEvent):
 class SectionAddedEvent(ReportEvent):
     """Event emitted when a section is added to a report."""
     section: ReportSection
+    report_id: UUID = field(default_factory=uuid4)
+    timestamp: datetime = field(default_factory=datetime.now)
     
     def event_type(self) -> str:
         return "report.section_added"
@@ -71,6 +71,8 @@ class SectionAddedEvent(ReportEvent):
 class ReportGeneratedEvent(ReportEvent):
     """Event emitted when a report is fully generated."""
     output_path: str
+    report_id: UUID = field(default_factory=uuid4)
+    timestamp: datetime = field(default_factory=datetime.now)
     
     def event_type(self) -> str:
         return "report.generated"

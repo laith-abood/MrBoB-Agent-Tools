@@ -27,7 +27,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 try:
-    from mrbob.domain.report_aggregate import (
+    from mrbob.reports.domain.report_aggregate import (
         Report,
         ReportType,
         ReportMetadata,
