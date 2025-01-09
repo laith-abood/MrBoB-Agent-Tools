@@ -11,7 +11,7 @@ Key architectural patterns:
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 from uuid import UUID, uuid4
 import json
 from abc import ABC, abstractmethod
@@ -31,6 +31,15 @@ class ReportMetadata:
     generated_at: datetime = field(default_factory=datetime.now)
     generated_by: str = ""
     report_type: ReportType = ReportType.AGENT_SUMMARY
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert metadata to dictionary format."""
+        return {
+            'version': self.version,
+            'generated_at': self.generated_at.isoformat(),
+            'generated_by': self.generated_by,
+            'report_type': self.report_type.value
+        }
 
 @dataclass(frozen=True)
 class ReportSection:

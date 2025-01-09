@@ -173,7 +173,6 @@ class PerformanceAnalyzer:
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.analysis_window = analysis_window
     
-    @lru_cache(maxsize=100)
     def calculate_agent_metrics(
         self,
         data: pd.DataFrame,
@@ -235,7 +234,8 @@ class PerformanceAnalyzer:
             metrics.status_distribution = data['status'].value_counts().to_dict()
             
             # Calculate time series metrics
-            monthly_data = data.set_index('effective_date').resample('M')
+            data['effective_date'] = pd.to_datetime(data['effective_date'])
+            monthly_data = data.set_index('effective_date').resample('ME')  # Using 'ME' for month end
             
             for metric_name in ['active_policies', 'chargeback_policies', 'retention_rate']:
                 values = []

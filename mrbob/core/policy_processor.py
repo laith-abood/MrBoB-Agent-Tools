@@ -317,6 +317,7 @@ class PolicyProcessor:
                 'total_policies': len(df),
                 'status_breakdown': df['status'].value_counts().to_dict(),
                 'carrier_breakdown': df['carrier'].value_counts().to_dict(),
+                'agent_breakdown': df['agent_npn'].value_counts().to_dict(),
                 'metrics': {
                     'processed_count': self.metrics.processed_count,
                     'error_count': self.metrics.error_count,
@@ -333,6 +334,7 @@ class PolicyProcessor:
                 'total_policies': 0,
                 'status_breakdown': {},
                 'carrier_breakdown': {},
+                'agent_breakdown': {},
                 'metrics': self.metrics.to_dict(),
                 'policies': []
             }
