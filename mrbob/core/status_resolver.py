@@ -1,28 +1,43 @@
 """
-Advanced status resolution module implementing CQRS pattern for policy status management.
+Advanced status resolution module implementing CQRS pattern for policy status
+management.
 
 This module provides sophisticated status resolution with:
 - Concurrent status updates using actor-based processing
 - Event sourcing for status history
-- In-memory caching with LRU strategy
+- In-memory caching with TTL strategy
 - Optimistic locking for conflict resolution
 """
 
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Set
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
-from collections import defaultdict
 import threading
-from cachetools import TTLCache, LRUCache
+from cachetools import TTLCache
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
-from functools import lru_cache
 import hashlib
 import json
+import zlib
+from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
+
+class VersionVector(NamedTuple):
+    """Vector clock for conflict resolution."""
+    node_id: str
+    counter: int
+    timestamp: datetime
+
+class StatusValidationRule(NamedTuple):
+    """Rule for validating status transitions."""
+    from_status: str
+    to_status: str
+    allowed_sources: Set[str]
+    min_duration: Optional[timedelta] = None
+    required_metadata: Set[str] = set()
 
 class StatusPriority(Enum):
     """Status priority hierarchy for resolution."""
@@ -71,6 +86,18 @@ class StatusTransition:
         }
 
 @dataclass
+class CompressedTransitions:
+    """Compressed status transition history."""
+    def __init__(self, transitions: List[StatusTransition]):
+        self.data = zlib.compress(
+            json.dumps([t.to_dict() for t in transitions]).encode()
+        )
+    
+    def decompress(self) -> List[Dict]:
+        """Decompress transition history."""
+        return json.loads(zlib.decompress(self.data).decode())
+
+@dataclass
 class StatusContext:
     """Rich context for status resolution."""
     current_status: str
@@ -79,6 +106,74 @@ class StatusContext:
     version: int = 0
     metadata: Dict = field(default_factory=dict)
     transitions: List[StatusTransition] = field(default_factory=list)
+
+class StatusValidator:
+    """Validates status transitions based on rules."""
+    
+    def __init__(self):
+        self._rules = self._initialize_rules()
+    
+    def _initialize_rules(self) -> List[StatusValidationRule]:
+        """Initialize status transition rules."""
+        return [
+            StatusValidationRule(
+                from_status='PENDING',
+                to_status='ACTIVE',
+                allowed_sources={'CARRIER', 'AGENCY'},
+                min_duration=timedelta(days=1),
+                required_metadata={'effective_date', 'carrier_id'}
+            ),
+            StatusValidationRule(
+                from_status='ACTIVE',
+                to_status='TERMINATED',
+                allowed_sources={'CARRIER'},
+                min_duration=timedelta(days=30),
+                required_metadata={'termination_reason'}
+            ),
+            # Add more rules as needed
+        ]
+    
+    def validate_transition(
+        self,
+        from_status: str,
+        to_status: str,
+        source: StatusSource,
+        context: StatusContext,
+        metadata: Dict
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Validate status transition against rules.
+        
+        Args:
+            from_status: Current status
+            to_status: Proposed status
+            source: Status source
+            context: Current context
+            metadata: Transition metadata
+            
+        Returns:
+            Tuple[bool, Optional[str]]: (is_valid, error_message)
+        """
+        for rule in self._rules:
+            if (rule.from_status == from_status and rule.to_status == to_status):
+                # Check source
+                if source.name not in rule.allowed_sources:
+                    return False, f"Invalid source {source.name} for transition"
+                
+                # Check duration
+                if rule.min_duration:
+                    duration = datetime.now() - context.effective_date
+                    if duration < rule.min_duration:
+                        return False, "Minimum duration not met"
+                
+                # Check metadata
+                missing = rule.required_metadata - set(metadata.keys())
+                if missing:
+                    return False, f"Missing required metadata: {missing}"
+                
+                return True, None
+        
+        return False, "No matching transition rule"
 
 class StatusResolutionStrategy:
     """Strategy pattern for status resolution logic."""
@@ -116,8 +211,12 @@ class StatusResolutionStrategy:
 
         # Same source, check status priority
         if new_source == current.source:
-            current_priority = StatusResolutionStrategy.get_status_priority(current.current_status)
-            new_priority = StatusResolutionStrategy.get_status_priority(new_status)
+            current_priority = StatusResolutionStrategy.get_status_priority(
+                current.current_status
+            )
+            new_priority = StatusResolutionStrategy.get_status_priority(
+                new_status
+            )
             
             if new_priority < current_priority:
                 return True
@@ -127,6 +226,29 @@ class StatusResolutionStrategy:
                 return new_date > current.effective_date
 
         return False
+
+class ConflictResolver:
+    """Resolves conflicts using version vectors."""
+    
+    @staticmethod
+    def compare_versions(v1: VersionVector, v2: VersionVector) -> int:
+        """
+        Compare version vectors.
+        
+        Returns:
+            int: -1 if v1 < v2, 0 if concurrent, 1 if v1 > v2
+        """
+        if v1.timestamp < v2.timestamp:
+            return -1
+        elif v1.timestamp > v2.timestamp:
+            return 1
+        
+        if v1.counter < v2.counter:
+            return -1
+        elif v1.counter > v2.counter:
+            return 1
+        
+        return 0
 
 class StatusCache:
     """Thread-safe status cache with TTL and LRU eviction."""
@@ -161,13 +283,25 @@ class StatusResolver:
     - Event sourcing for status history
     - Optimistic locking for conflict resolution
     - In-memory caching with TTL
+    - Status transition validation
+    - Compressed history storage
+    """
+    """
+    Advanced status resolver with concurrent processing and caching.
+    
+    Features:
+    - Actor-based concurrent processing
+    - Event sourcing for status history
+    - Optimistic locking for conflict resolution
+    - In-memory caching with TTL
     """
     
     def __init__(
         self,
         cache_size: int = 10000,
         cache_ttl: int = 3600,
-        max_workers: int = 4
+        max_workers: int = 4,
+        node_id: str = 'default'
     ):
         """
         Initialize resolver with configuration.
@@ -180,9 +314,13 @@ class StatusResolver:
         self.cache = StatusCache(cache_size, cache_ttl)
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.strategy = StatusResolutionStrategy()
+        self.validator = StatusValidator()
+        self.conflict_resolver = ConflictResolver()
         self._status_queue = asyncio.Queue()
         self._processing = False
         self._processing_lock = threading.Lock()
+        self._node_id = node_id
+        self._version_counter = 0
 
     async def start_processing(self) -> None:
         """Start asynchronous status processing."""
@@ -221,6 +359,15 @@ class StatusResolver:
         with self._processing_lock:
             self._processing = False
 
+    def _get_next_version(self) -> VersionVector:
+        """Get next version vector."""
+        self._version_counter += 1
+        return VersionVector(
+            node_id=self._node_id,
+            counter=self._version_counter,
+            timestamp=datetime.now()
+        )
+
     async def resolve_status(
         self,
         policy_id: str,
@@ -257,6 +404,21 @@ class StatusResolver:
                 self.cache.set(policy_id, current)
                 return new_status, None
             
+            # Validate transition
+            is_valid, error = self.validator.validate_transition(
+                current.current_status,
+                new_status,
+                source,
+                current,
+                metadata or {}
+            )
+            
+            if not is_valid:
+                logger.warning(
+                    f"Invalid transition for policy {policy_id}: {error}"
+                )
+                return current.current_status, None
+            
             # Check if update needed
             if self.strategy.should_update_status(
                 current,
@@ -264,14 +426,19 @@ class StatusResolver:
                 source,
                 effective_date
             ):
-                # Create transition record
+                # Get next version
+                next_version = self._get_next_version()
+                # Create transition record with version
                 transition = StatusTransition(
                     policy_id=policy_id,
                     from_status=current.current_status,
                     to_status=new_status,
                     transition_date=datetime.now(),
                     source=source,
-                    metadata=metadata or {}
+                    metadata={
+                        **(metadata or {}),
+                        'version': next_version._asdict()
+                    }
                 )
                 
                 # Queue update
@@ -313,15 +480,42 @@ class StatusResolver:
             
             # Optimistic locking check
             if current.version != transition.metadata.get('version', 0):
-                logger.warning(f"Concurrent modification detected for policy {policy_id}")
+                logger.warning(
+                    f"Concurrent modification detected for policy {policy_id}"
+                )
                 return
+            
+            # Check for conflicts
+            current_version = VersionVector(**current.metadata.get('version', {
+                'node_id': self._node_id,
+                'counter': 0,
+                'timestamp': datetime.min
+            }))
+            
+            comparison = self.conflict_resolver.compare_versions(
+                current_version,
+                transition.metadata['version']
+            )
+            
+            if comparison >= 0:
+                logger.warning(
+                    f"Concurrent modification detected for policy {policy_id}"
+                )
+                return current.current_status, None
             
             # Update context
             current.current_status = new_status
             current.source = source
             current.effective_date = effective_date
-            current.version += 1
-            current.transitions.append(transition)
+            current.metadata['version'] = transition.metadata['version']
+            
+            # Compress and store transitions
+            if len(current.transitions) >= 100:
+                compressed = CompressedTransitions(current.transitions)
+                current.metadata['compressed_history'] = compressed.data
+                current.transitions = [transition]
+            else:
+                current.transitions.append(transition)
             
             # Update cache
             self.cache.set(policy_id, current)

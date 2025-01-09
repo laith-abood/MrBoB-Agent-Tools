@@ -8,9 +8,10 @@ This module implements the core policy processing functionality with:
 - Performance monitoring
 """
 
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
+import hashlib
+import time
 import pandas as pd
-import numpy as np
 from datetime import datetime
 import logging
 from dataclasses import dataclass
@@ -18,14 +19,16 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import json
-from tenacity import retry, stop_after_attempt, wait_exponential
+from cachetools import TTLCache
 
-from .validation import DataValidator
-from .status_resolver import StatusResolver
-from .metrics import ProcessingMetrics
-from .exceptions import PolicyProcessingError
+# Local imports
+from mrbob.core.validation import DataValidator
+from mrbob.core.status_resolver import StatusResolver, StatusSource
+from mrbob.core.metrics import ProcessingMetrics
+from mrbob.core.exceptions import PolicyProcessingError
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ProcessingConfig:
@@ -35,6 +38,7 @@ class ProcessingConfig:
     retry_attempts: int = 3
     cache_enabled: bool = True
     validation_level: str = "strict"
+
 
 class PolicyProcessor:
     """
@@ -59,11 +63,19 @@ class PolicyProcessor:
         self.status_resolver = StatusResolver()
         self.executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
         self.metrics = ProcessingMetrics()
+        self._validation_cache = TTLCache(maxsize=10000, ttl=3600)  # 1 hour TTL
+        self._retry_config = {
+            'max_attempts': 5,
+            'initial_delay': 1,
+            'max_delay': 60,
+            'backoff_factor': 2
+        }
     
     async def process_policy_data(
         self,
         file_path: str,
-        required_columns: Optional[List[str]] = None
+        required_columns: Optional[List[str]] = None,
+        batch_size: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Process policy data from Excel file with optimized handling.
@@ -71,6 +83,7 @@ class PolicyProcessor:
         Args:
             file_path: Path to Excel file
             required_columns: Optional list of required columns
+            batch_size: Optional chunk size override
             
         Returns:
             Dict[str, Any]: Processed policy data with metrics
@@ -84,32 +97,46 @@ class PolicyProcessor:
             if not path.exists():
                 raise PolicyProcessingError(f"File not found: {file_path}")
             
-            # Process in chunks
+            # Stream data in memory-efficient chunks
             chunks = pd.read_excel(
                 file_path,
-                chunksize=self.config.chunk_size
+                chunksize=batch_size or self.config.chunk_size,
+                engine='openpyxl'  # More memory efficient for large files
             )
             
             processed_data = []
             futures = []
             
             async with asyncio.Lock():
-                for chunk in chunks:
-                    # Submit chunk for processing
+                for chunk_index, chunk in enumerate(chunks):
+                    # Submit chunk for processing with retry
                     future = self.executor.submit(
-                        self._process_chunk,
+                        self._process_chunk_with_retry,
                         chunk,
-                        required_columns
+                        required_columns,
+                        chunk_index
                     )
                     futures.append(future)
                     
-                # Wait for all chunks
-                for future in futures:
+                # Process chunks with progress tracking
+                total_chunks = len(futures)
+                for chunk_index, future in enumerate(futures, 1):
                     try:
                         result = future.result()
                         processed_data.extend(result)
+                        logger.info(
+                            f"Processed chunk {chunk_index}/{total_chunks}"
+                        )
                     except Exception as e:
-                        logger.error(f"Chunk processing failed: {str(e)}")
+                        error_context = {
+                            'chunk_index': chunk_index,
+                            'total_chunks': total_chunks,
+                            'error_type': type(e).__name__,
+                            'error_details': str(e)
+                        }
+                        logger.error(
+                            f"Chunk processing failed: {json.dumps(error_context)}"
+                        )
                         self.metrics.error_count += 1
             
             # Aggregate results
@@ -124,10 +151,62 @@ class PolicyProcessor:
             logger.error(f"Policy processing failed: {str(e)}")
             raise PolicyProcessingError(f"Processing failed: {str(e)}")
     
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10)
-    )
+    def _get_chunk_cache_key(self, chunk: pd.DataFrame) -> str:
+        """
+        Generate cache key for chunk validation results.
+        
+        Args:
+            chunk: DataFrame chunk
+            
+        Returns:
+            str: Cache key
+        """
+        content = pd.util.hash_pandas_object(chunk).values.tobytes()
+        return f"chunk_validation_{hashlib.md5(content).hexdigest()}"
+    
+    def _process_chunk_with_retry(
+        self,
+        chunk: pd.DataFrame,
+        required_columns: Optional[List[str]],
+        chunk_index: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Process chunk with exponential backoff retry.
+        
+        Args:
+            chunk: DataFrame chunk
+            required_columns: Required columns
+            chunk_index: Index of current chunk
+            
+        Returns:
+            List[Dict[str, Any]]: Processed chunk data
+        """
+        attempt = 0
+        delay = self._retry_config['initial_delay']
+        
+        while attempt < self._retry_config['max_attempts']:
+            try:
+                return self._process_chunk(chunk, required_columns)
+            except Exception as e:
+                attempt += 1
+                if attempt == self._retry_config['max_attempts']:
+                    raise
+                
+                error_context = {
+                    'chunk_index': chunk_index,
+                    'attempt': attempt,
+                    'max_attempts': self._retry_config['max_attempts'],
+                    'delay': delay,
+                    'error': str(e)
+                }
+                logger.warning(f"Retrying chunk: {json.dumps(error_context)}")
+                
+                time.sleep(delay)
+                delay = min(
+                    delay * self._retry_config['backoff_factor'],
+                    self._retry_config['max_delay']
+                )
+    
     def _process_chunk(
         self,
         chunk: pd.DataFrame,
@@ -144,11 +223,18 @@ class PolicyProcessor:
             List[Dict[str, Any]]: Processed chunk data
         """
         try:
-            # Validate chunk data
-            validation_result = self.validator.validate_chunk(
-                chunk,
-                required_columns
-            )
+            # Check validation cache
+            cache_key = self._get_chunk_cache_key(chunk)
+            validation_result = self._validation_cache.get(cache_key)
+            
+            if validation_result is None:
+                # Validate chunk data if not in cache
+                validation_result = self.validator.validate_chunk(
+                    chunk,
+                    required_columns
+                )
+                self._validation_cache[cache_key] = validation_result
+            
             if not validation_result.is_valid:
                 logger.warning(
                     f"Chunk validation failed: {validation_result.errors}"
@@ -157,15 +243,24 @@ class PolicyProcessor:
                 return []
             
             processed_policies = []
+            
+            # Process policies in parallel for better performance
             for _, row in chunk.iterrows():
                 try:
-                    # Process individual policy
-                    policy_data = self._process_policy(row)
+                    future = self.executor.submit(self._process_policy, row)
+                    policy_data = future.result()
                     if policy_data:
                         processed_policies.append(policy_data)
                         self.metrics.processed_count += 1
                 except Exception as e:
-                    logger.error(f"Policy processing error: {str(e)}")
+                    error_context = {
+                        'policy_number': str(row.get('Policy Number', 'Unknown')),
+                        'error_type': type(e).__name__,
+                        'error_details': str(e)
+                    }
+                    logger.error(
+                        f"Policy processing error: {json.dumps(error_context)}"
+                    )
                     self.metrics.error_count += 1
             
             return processed_policies
@@ -195,8 +290,9 @@ class PolicyProcessor:
             effective_date = pd.to_datetime(row.get('Effective Date'))
             
             resolved_status, transition = self.status_resolver.resolve_status(
+                policy_number,
                 current_status,
-                None,
+                StatusSource.SYSTEM,
                 effective_date
             )
             
