@@ -1,0 +1,15 @@
+Metadata-Version: 2.1
+Name: mrbob-agent-tools
+Version: 0.1.0
+Summary: Insurance agent tools for policy management and reporting
+Author: Laith Abood
+Requires-Python: >=3.8
+License-File: LICENSE
+Requires-Dist: cachetools>=5.0.0
+Requires-Dist: tenacity>=8.0.0
+Requires-Dist: pandas>=1.4.0
+Requires-Dist: numpy>=1.21.0
+Requires-Dist: pytest>=7.0.0
+Requires-Dist: openpyxl>=3.0.0
+Requires-Dist: reportlab>=3.6.0
+Requires-Dist: xlsxwriter>=3.0.0
