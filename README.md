@@ -2,93 +2,101 @@
 
 A comprehensive suite of tools for insurance agents to manage and analyze policy data, generate reports, and track performance metrics.
 
-## Overview
+## Features
 
-MrBoB Agent Tools is a powerful Python-based toolkit designed specifically for insurance agents to streamline their workflow and enhance productivity. It provides robust functionality for data processing, report generation, and performance analytics.
+- **Policy Processing**: Efficient processing of policy data with validation and status resolution
+- **Performance Analytics**: Advanced analytics with trend analysis and predictions
+- **Report Generation**: Customizable reports in multiple formats (PDF, Excel)
+- **Caching Strategy**: Optimized performance with intelligent caching
+- **Event Sourcing**: Robust state tracking and audit trails
+- **Concurrent Processing**: Efficient handling of large datasets
 
-## Key Features
+## Development Setup
 
-### 1. Report Generation
-- **PDF Reports**: Generate professional PDF reports with:
-  - Agent performance metrics
-  - Policy status summaries
-  - Carrier breakdowns
-  - Historical trends
-- **Excel Reports**: Create detailed Excel workbooks with:
-  - Comprehensive data analysis
-  - Interactive dashboards
-  - Status tracking
-  - Performance metrics
-
-### 2. Data Processing
-- Policy status tracking and resolution
-- Automated data validation
-- Error detection and reporting
-- Batch processing capabilities
-
-### 3. Performance Analytics
-- Agent performance metrics
-- Carrier-wise analysis
-- Status transition tracking
-- Historical trend analysis
-
-## Installation
-
+1. Clone the repository:
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/laith-abood/MrBoB-Agent-Tools.git
+cd MrBoB-Agent-Tools
 ```
 
-## Quick Start
+2. Set up development environment:
+```bash
+# Make setup script executable
+chmod +x scripts/setup_dev.sh
 
-```python
-from mrbob.report_generator import generate_agent_reports
-from mrbob.data_processor import process_policy_data
-
-# Generate agent reports
-reports = generate_agent_reports('path/to/data.xlsx')
-
-# Process policy data
-processed_data = process_policy_data('path/to/policy_data.xlsx')
+# Run setup script
+./scripts/setup_dev.sh
 ```
 
-## Core Components
-
-### Report Generator
-- PDF report generation with customizable templates
-- Excel workbook creation with automated formatting
-- Multi-format export capabilities
-
-### Data Processor
-- Policy status resolution engine
-- Data validation framework
-- Error handling and logging
-
-### Analytics Engine
-- Performance metrics calculation
-- Status transition analysis
-- Carrier performance tracking
+3. Activate virtual environment:
+```bash
+source venv/bin/activate
+```
 
 ## Project Structure
 
 ```
-mrbob-agent-tools/
-├── mrbob/
-│   ├── report_generator/
-│   ├── data_processor/
-│   └── analytics/
-├── tests/
-├── docs/
-└── examples/
+mrbob/
+├── core/               # Core processing functionality
+│   ├── policy_processor.py
+│   └── status_resolver.py
+├── analytics/          # Performance analytics
+│   └── performance_analyzer.py
+└── reports/           # Report generation
+    ├── application/   # Application services
+    │   └── report_service.py
+    └── domain/        # Domain models
+        └── report_aggregate.py
 ```
+
+## Usage Example
+
+```python
+from mrbob import (
+    PolicyProcessor,
+    ReportService,
+    PerformanceAnalyzer
+)
+
+# Process policy data
+processor = PolicyProcessor()
+result = await processor.process_policy_data("data/policies.csv")
+
+# Analyze performance
+analyzer = PerformanceAnalyzer()
+metrics = analyzer.calculate_agent_metrics(result['data'])
+
+# Generate reports
+report_service = ReportService()
+report_id = await report_service.generate_report(metrics)
+```
+
+See `examples/process_and_report.py` for a complete example.
+
+## Key Components
+
+### Policy Processor
+- Validates and processes raw policy data
+- Resolves policy statuses with conflict handling
+- Supports concurrent processing with retry logic
+
+### Performance Analyzer
+- Calculates comprehensive performance metrics
+- Provides trend analysis and predictions
+- Supports various aggregation strategies
+
+### Report Service
+- Generates customized reports
+- Supports multiple output formats
+- Implements CQRS pattern for scalability
 
 ## Contributing
 
-We welcome contributions! Please read our contributing guidelines before submitting pull requests.
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Support
-
-For support, please raise an issue on GitHub or contact our support team.
+MIT License - see LICENSE file for details.

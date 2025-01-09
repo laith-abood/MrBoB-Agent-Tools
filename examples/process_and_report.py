@@ -17,15 +17,15 @@ from typing import Dict, Any, List
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # MrBoB imports
-from mrbob.analytics.performance_analyzer import PerformanceAnalyzer
-from mrbob.core.policy_processor import PolicyProcessor
-from mrbob.core.exceptions import PolicyProcessingError
-from mrbob.reports.application.report_service import (
+from mrbob import (
+    PolicyProcessor,
+    PolicyProcessingError,
     ReportService,
     GenerateReportCommand,
-    ReportType
+    ReportType,
+    ReportGenerationError,
+    PerformanceAnalyzer
 )
-from mrbob.reports.application.exceptions import ReportGenerationError
 
 # Local imports
 import mock_dependencies as mock
