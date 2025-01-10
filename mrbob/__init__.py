@@ -13,6 +13,8 @@ from mrbob.core.policy_processor import PolicyProcessor
 from mrbob.reports.application.report_service import (
     ReportService,
     GenerateReportCommand,
+    AddSectionCommand,
+    FinalizeReportCommand,
     ReportType
 )
 from mrbob.analytics.performance_analyzer import PerformanceAnalyzer
@@ -29,6 +31,8 @@ __all__ = [
     # Reports
     'ReportService',
     'GenerateReportCommand',
+    'AddSectionCommand',
+    'FinalizeReportCommand',
     'ReportType',
     'ReportGenerationError',
     'TemplateError',

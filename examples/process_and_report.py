@@ -10,12 +10,13 @@ This script shows how to:
 import asyncio
 import logging
 import sys
-import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import pandas as pd
 
 # MrBoB imports
 from mrbob import (
@@ -23,6 +24,8 @@ from mrbob import (
     PolicyProcessingError,
     ReportService,
     GenerateReportCommand,
+    AddSectionCommand,
+    FinalizeReportCommand,
     ReportType,
     ReportGenerationError,
     PerformanceAnalyzer
@@ -161,8 +164,39 @@ async def generate_reports(
             # Generate report
             report_id = await report_service.handle_command(command)
             
-            # Get report file path
+            # Add performance metrics section
+            metrics_section = AddSectionCommand(
+                report_id=report_id,
+                title="Performance Metrics",
+                content=data['analysis']['summary'],
+                order=1,
+                template_key="metrics"
+            )
+            await report_service.handle_command(metrics_section)
+            
+            # Add policy details section
+            policy_section = AddSectionCommand(
+                report_id=report_id,
+                title="Policy Details",
+                content={
+                    'policies': [
+                        policy for policy in data['data']['policies']
+                        if policy['agent_npn'] == agent_npn
+                    ]
+                },
+                order=2,
+                template_key="policies"
+            )
+            await report_service.handle_command(policy_section)
+            
+            # Finalize and save report
             report_path = output_path / f"agent_{agent_npn}_{report_id}.pdf"
+            finalize_command = FinalizeReportCommand(
+                report_id=report_id,
+                output_path=str(report_path)
+            )
+            await report_service.handle_command(finalize_command)
+            
             report_files.append(str(report_path))
             
             logger.info(f"Generated report for agent {agent_npn}")
