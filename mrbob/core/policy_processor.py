@@ -25,6 +25,7 @@ from mrbob.core.validation import DataValidator
 from mrbob.core.status_resolver import StatusResolver, StatusSource
 from mrbob.core.metrics import ProcessingMetrics
 from mrbob.core.exceptions import PolicyProcessingError
+from mrbob.core.retry import process_chunk_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,8 @@ class PolicyProcessor:
             # Process chunks with progress tracking
             for chunk_index, chunk in enumerate(chunks, 1):
                 try:
-                    result = await self._process_chunk_with_retry(
+                    result = await process_chunk_with_retry(
+                        self,
                         chunk,
                         required_columns,
                         chunk_index
@@ -148,54 +150,11 @@ class PolicyProcessor:
         content = pd.util.hash_pandas_object(chunk).values.tobytes()
         return f"chunk_validation_{hashlib.md5(content).hexdigest()}"
     
-    async def _process_chunk_with_retry(
-        self,
-        chunk: pd.DataFrame,
-        required_columns: Optional[List[str]],
-        chunk_index: int
-    ) -> List[Dict[str, Any]]:
-        """
-        Process chunk with exponential backoff retry.
-        
-        Args:
-            chunk: DataFrame chunk
-            required_columns: Required columns
-            chunk_index: Index of current chunk
-            
-        Returns:
-            List[Dict[str, Any]]: Processed chunk data
-        """
-        attempt = 0
-        delay = self._retry_config['initial_delay']
-        
-        while attempt < self._retry_config['max_attempts']:
-            try:
-                return await self._process_chunk(chunk, required_columns)
-            except Exception as e:
-                attempt += 1
-                if attempt == self._retry_config['max_attempts']:
-                    raise
-                
-                error_context = {
-                    'chunk_index': chunk_index,
-                    'attempt': attempt,
-                    'max_attempts': self._retry_config['max_attempts'],
-                    'delay': delay,
-                    'error': str(e)
-                }
-                logger.warning(f"Retrying chunk: {json.dumps(error_context)}")
-                
-                await asyncio.sleep(delay)
-                delay = min(
-                    delay * self._retry_config['backoff_factor'],
-                    self._retry_config['max_delay']
-                )
-    
     async def _process_chunk(
         self,
         chunk: pd.DataFrame,
         required_columns: Optional[List[str]] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> List<Dict[str, Any]]:
         """
         Process a chunk of policy data with retry logic.
         
