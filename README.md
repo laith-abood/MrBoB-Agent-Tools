@@ -100,3 +100,77 @@ See `examples/process_and_report.py` for a complete example.
 ## License
 
 MIT License - see LICENSE file for details.
+
+## Setting Up and Running the Server
+
+1. Ensure you have Python 3.8 or higher installed.
+2. Install the required dependencies:
+```bash
+pip install -r requirements.txt
+```
+3. Run the FastAPI server:
+```bash
+uvicorn server:app --reload
+```
+4. Open your browser and navigate to `http://127.0.0.1:8000` to access the application.
+
+## Using Different Features of the Repository
+
+### Processing Policy Data
+To process policy data, use the `PolicyProcessor` class. Here's an example:
+```python
+from mrbob import PolicyProcessor
+
+processor = PolicyProcessor()
+result = await processor.process_policy_data("data/sample_policy_data.csv")
+print(result)
+```
+
+### Analyzing Performance
+To analyze performance metrics, use the `PerformanceAnalyzer` class. Here's an example:
+```python
+from mrbob import PerformanceAnalyzer
+
+analyzer = PerformanceAnalyzer()
+metrics = analyzer.calculate_agent_metrics(result['data'])
+print(metrics)
+```
+
+### Generating Reports
+To generate reports, use the `ReportService` class. Here's an example:
+```python
+from mrbob import ReportService, GenerateReportCommand, AddSectionCommand, FinalizeReportCommand, ReportType
+
+report_service = ReportService()
+command = GenerateReportCommand(
+    agent_npn="12345",
+    report_type=ReportType.PERFORMANCE_ANALYSIS,
+    generated_by="system",
+    options={"include_charts": True, "format": "pdf"}
+)
+report_id = await report_service.handle_command(command)
+
+metrics_section = AddSectionCommand(
+    report_id=report_id,
+    title="Performance Metrics",
+    content=metrics.to_dict()['summary'],
+    order=1,
+    template_key="metrics"
+)
+await report_service.handle_command(metrics_section)
+
+policy_section = AddSectionCommand(
+    report_id=report_id,
+    title="Policy Details",
+    content={"policies": result['data']['policies']},
+    order=2,
+    template_key="policies"
+)
+await report_service.handle_command(policy_section)
+
+finalize_command = FinalizeReportCommand(
+    report_id=report_id,
+    output_path="output/reports/agent_12345_report.pdf"
+)
+await report_service.handle_command(finalize_command)
+```
